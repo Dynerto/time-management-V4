@@ -2,10 +2,11 @@
 declare(strict_types=1);
 
 /**
- * Public (BFF) API met:
+ * Public (BFF) API
  * - Cookie-sessies (HttpOnly, Secure, SameSite=Strict)
  * - CSRF check voor mutaties
- * - E-mail verify & password reset flows
+ * - E-mail (PHPMailer via SMTP)
+ * - Rate-limiting (SQLite) per IP / per e-mail / per user-id
  * - Proxy naar Internal API (HMAC via X-Internal-Secret + API Key)
  */
 
@@ -13,6 +14,11 @@ function cfg(){ static $c=null; if($c===null){ $c=include __DIR__.'/public_confi
 function j($d,$c=200){ http_response_code($c); header('Content-Type: application/json'); echo json_encode($d); exit; }
 function bad($m,$c=400){ j(['error'=>$m],$c); }
 function body(): array { $raw=file_get_contents('php://input'); $d=json_decode($raw?:'',true); return is_array($d)?$d:[]; }
+function client_ip(): string {
+  $h = $_SERVER['HTTP_CF_CONNECTING_IP'] ?? $_SERVER['HTTP_X_FORWARDED_FOR'] ?? $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+  if (strpos($h, ',') !== false) $h = trim(explode(',', $h)[0]);
+  return trim($h);
+}
 
 // ---------- CORS (met credentials) ----------
 $origin = $_SERVER['HTTP_ORIGIN'] ?? null;
@@ -55,6 +61,125 @@ function require_csrf_for_state_change() {
 }
 require_csrf_for_state_change();
 
+// ---------- SQLite Rate Limiter ----------
+function rl_db_path(): string {
+  $path = __DIR__.'/rate_limit.sqlite';
+  if (!is_writable(__DIR__)) { $path = sys_get_temp_dir().'/rate_limit.sqlite'; }
+  return $path;
+}
+function rl_db(): PDO {
+  static $pdo=null;
+  if ($pdo) return $pdo;
+  $pdo = new PDO('sqlite:'.rl_db_path(), null, null, [PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION]);
+  $pdo->exec("PRAGMA journal_mode=WAL;");
+  $pdo->exec("CREATE TABLE IF NOT EXISTS buckets(
+      key TEXT NOT NULL,
+      window_start INTEGER NOT NULL,
+      count INTEGER NOT NULL,
+      PRIMARY KEY(key, window_start)
+  );");
+  return $pdo;
+}
+/**
+ * rate_limit('login_ip', [60,3600], [client_ip()])
+ * @return array{ok:bool, retry_after?:int}
+ */
+function rate_limit(string $name, int $max, int $window, array $parts=[]): array {
+  $k = $name.':'.implode('|', $parts);
+  $now = time();
+  $win = (int)floor($now / $window) * $window;
+  $pdo = rl_db();
+  $pdo->beginTransaction();
+  try {
+    $stmt = $pdo->prepare("SELECT count FROM buckets WHERE key=? AND window_start=?");
+    $stmt->execute([$k,$win]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    $count = $row ? (int)$row['count'] : 0;
+    if ($count >= $max) {
+      $pdo->commit();
+      $retry = $win + $window - $now;
+      return ['ok'=>false,'retry_after'=>$retry];
+    }
+    if ($row) {
+      $stmt = $pdo->prepare("UPDATE buckets SET count=count+1 WHERE key=? AND window_start=?");
+      $stmt->execute([$k,$win]);
+    } else {
+      $stmt = $pdo->prepare("INSERT INTO buckets(key,window_start,count) VALUES(?,?,1)");
+      $stmt->execute([$k,$win]);
+    }
+    $pdo->commit();
+    return ['ok'=>true];
+  } catch(Throwable $e){
+    $pdo->rollBack();
+    // Fail-open bij RL crash (je kan hier fail-closed kiezen)
+    return ['ok'=>true];
+  }
+}
+function enforce_rl(string $key, array $keyParts=[], ?int $max=null, ?int $win=null): void {
+  $cfg = cfg()['rate_limits'][$key] ?? null;
+  if (!$cfg && $max===null) return;
+  [$m,$w] = $cfg ?: [$max,$win];
+  $res = rate_limit($key, (int)$m, (int)$w, $keyParts);
+  if (!$res['ok']) {
+    header('Retry-After: '.(int)$res['retry_after']);
+    bad('Too many requests', 429);
+  }
+}
+
+// Globale per-IP limiter
+enforce_rl('global_ip', [client_ip()]);
+
+// ---------- PHPMailer (SMTP) ----------
+function mailer_or_throw(): \PHPMailer\PHPMailer\PHPMailer {
+  // Composer?
+  $autoload1 = __DIR__.'/vendor/autoload.php';
+  $autoload2 = __DIR__.'/../vendor/autoload.php';
+  if (is_readable($autoload1)) require_once $autoload1;
+  elseif (is_readable($autoload2)) require_once $autoload2;
+  // Handmatige map?
+  if (!class_exists('\\PHPMailer\\PHPMailer\\PHPMailer')) {
+    $base = __DIR__.'/lib/phpmailer/src';
+    $ph = $base.'/PHPMailer.php'; $sm = $base.'/SMTP.php'; $ex = $base.'/Exception.php';
+    if (is_readable($ph) && is_readable($sm) && is_readable($ex)) {
+      require_once $ex; require_once $ph; require_once $sm;
+    }
+  }
+  if (!class_exists('\\PHPMailer\\PHPMailer\\PHPMailer')) {
+    throw new RuntimeException('PHPMailer not installed. Use Composer or place PHPMailer src in /lib/phpmailer/src/');
+  }
+  $cfg = cfg()['smtp'] ?? [];
+  $mail = new \PHPMailer\PHPMailer\PHPMailer(true);
+  $mail->isSMTP();
+  $mail->Host       = (string)($cfg['host'] ?? '');
+  $mail->Port       = (int)   ($cfg['port'] ?? 587);
+  $sec              = (string)($cfg['secure'] ?? 'tls');
+  if ($sec === 'ssl') $mail->SMTPSecure = \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_SMTPS;
+  else $mail->SMTPSecure = \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_STARTTLS;
+  $mail->SMTPAuth   = true;
+  $mail->Username   = (string)($cfg['username'] ?? '');
+  $mail->Password   = (string)($cfg['password'] ?? '');
+  $fromEmail        = (string)($cfg['from_email'] ?? 'no-reply@example.com');
+  $fromName         = (string)($cfg['from_name']  ?? 'Timelog');
+  $mail->setFrom($fromEmail, $fromName);
+  if (!empty($cfg['reply_to'])) $mail->addReplyTo((string)$cfg['reply_to']);
+  $mail->isHTML(true);
+  $mail->CharSet = 'UTF-8';
+  return $mail;
+}
+function send_mail(string $toEmail, string $subject, string $html): void {
+  try{
+    $mail = mailer_or_throw();
+    $mail->addAddress($toEmail);
+    $mail->Subject = $subject;
+    $mail->Body    = $html;
+    $mail->AltBody = strip_tags($html);
+    $mail->send();
+  } catch(Throwable $e){
+    error_log('send_mail error: '.$e->getMessage());
+    // Optioneel: bad('Mail delivery failed', 500);
+  }
+}
+
 // ---------- Proxy helper ----------
 function call_internal(string $path,string $method,?array $payload,?string $userId){
     $cfg=cfg();
@@ -64,21 +189,13 @@ function call_internal(string $path,string $method,?array $payload,?string $user
         'X-Internal-Secret: '.$cfg['internal_secret'],
         'X-Api-Key: '.$cfg['api_key']];
     if($userId) $headers[]='X-User-Id: '.$userId;
-    curl_setopt_array($ch,[CURLOPT_CUSTOMREQUEST=>$method,CURLOPT_RETURNTRANSFER=>true,CURLOPT_HTTPHEADER=>$headers]);
+    curl_setopt_array($ch,[CURLOPT_CUSTOMREQUEST=>$method,CURLOPT_RETURNTRANSFER=>true,CURLOPT_HTTPHEADER=>$headers, CURLOPT_TIMEOUT=>15]);
     if($payload!==null) curl_setopt($ch,CURLOPT_POSTFIELDS,json_encode($payload));
-    $resp=curl_exec($ch); if($resp===false){ curl_close($ch); bad('Internal unreachable',502); }
+    $resp=curl_exec($ch); if($resp===false){ $err = curl_error($ch); curl_close($ch); bad('Internal unreachable: '.$err,502); }
     $status=curl_getinfo($ch,CURLINFO_HTTP_CODE); curl_close($ch);
     $json=json_decode($resp,true);
     if($status>=400) bad(($json['error']??'Internal error').' ('.$status.')',$status);
     return $json;
-}
-
-// ---------- Mail helper ----------
-function send_mail(string $to,string $subject,string $html): void {
-    $headers = "MIME-Version: 1.0\r\n".
-               "Content-Type: text/html; charset=UTF-8\r\n".
-               "From: ".(cfg()['mail_from'] ?? 'no-reply@example.com')."\r\n";
-    @mail($to,$subject,$html,$headers);
 }
 
 // ---------- Routing ----------
@@ -90,16 +207,20 @@ $userId = $_SESSION['uid'] ?? null;
 
 // ---------- AUTH ----------
 if (($seg[0]??'')==='auth' && $method==='POST' && ($seg[1]??'')==='register') {
+    enforce_rl('register_ip',  [client_ip()]);
     $d=body(); $email=trim(strtolower($d['email']??'')); $pw=$d['password']??'';
+    enforce_rl('register_email', [$email]);
     $r=call_internal('/internal/register','POST',['email'=>$email,'password'=>$pw],null);
     $vt=call_internal('/internal/users/verification','POST',['user_id'=>$r['id']],null);
     $verifyLink = rtrim(cfg()['app_url'],'/').'/index.html?verify='.urlencode($vt['token']);
-    send_mail($r['email'],'Bevestig je e-mailadres', '<p>Bevestig je e-mailadres voor Timelog:</p><p><a href="'.$verifyLink.'">E-mailadres bevestigen</a></p>');
+    send_mail($r['email'],'Bevestig je e-mailadres', '<p>Bevestig je e-mailadres voor Timelog:</p><p><a href="'.$verifyLink.'">E-mailadres bevestigen</a></p><p>Link verloopt binnenkort.</p>');
     $_SESSION['uid']=$r['id']; $_SESSION['email']=$r['email'];
     j(['ok'=>true,'user'=>['id'=>$r['id'],'email'=>$r['email'],'verified'=>false]],201);
 }
 if (($seg[0]??'')==='auth' && $method==='POST' && ($seg[1]??'')==='login') {
+    enforce_rl('login_ip', [client_ip()]);
     $d=body(); $email=trim(strtolower($d['email']??'')); $pw=$d['password']??'';
+    enforce_rl('login_user', [$email]);
     $r=call_internal('/internal/login','POST',['email'=>$email,'password'=>$pw],null);
     $_SESSION['uid']=$r['id']; $_SESSION['email']=$email;
     j(['ok'=>true,'user'=>['id'=>$r['id'],'email'=>$email,'verified'=>!empty($r['verified'])]]);
@@ -113,6 +234,7 @@ if (($seg[0]??'')==='auth' && $method==='GET' && ($seg[1]??'')==='me') {
     j(['user'=>$u]);
 }
 if (($seg[0]??'')==='auth' && $method==='GET' && ($seg[1]??'')==='verify' && isset($_GET['token'])){
+    enforce_rl('verify_ip', [client_ip()]);
     $token=$_GET['token'];
     call_internal('/internal/users/verify','POST',['token'=>$token],null);
     header('Content-Type: text/html; charset=UTF-8');
@@ -121,13 +243,17 @@ if (($seg[0]??'')==='auth' && $method==='GET' && ($seg[1]??'')==='verify' && iss
 }
 if (($seg[0]??'')==='auth' && $method==='POST' && ($seg[1]??'')==='resend-verify'){
     if(!$userId) bad('Unauthorized',401);
+    enforce_rl('resend_ip', [client_ip()]);
+    enforce_rl('resend_uid', [$userId]);
     $vt=call_internal('/internal/users/verification','POST',['user_id'=>$userId],null);
     $verifyLink = rtrim(cfg()['app_url'],'/').'/index.html?verify='.urlencode($vt['token']);
     send_mail($_SESSION['email'] ?? '','Bevestig je e-mailadres', '<p>Bevestig je e-mailadres:</p><p><a href="'.$verifyLink.'">Bevestigen</a></p>');
     j(['ok'=>true]);
 }
 if (($seg[0]??'')==='auth' && $method==='POST' && ($seg[1]??'')==='request-reset'){
+    enforce_rl('reset_req_ip', [client_ip()]);
     $d=body(); $email=trim(strtolower($d['email']??''));
+    enforce_rl('reset_req_email', [$email]);
     $res=call_internal('/internal/users/password-reset','POST',['email'=>$email],null);
     if(!empty($res['token'])){
         $link = rtrim(cfg()['app_url'],'/').'/index.html?reset='.urlencode($res['token']);
@@ -136,6 +262,7 @@ if (($seg[0]??'')==='auth' && $method==='POST' && ($seg[1]??'')==='request-reset
     j(['ok'=>true]);
 }
 if (($seg[0]??'')==='auth' && $method==='POST' && ($seg[1]??'')==='reset'){
+    enforce_rl('reset_confirm_ip', [client_ip()]);
     $d=body(); $token=$d['token']??''; $pw=$d['new_password']??'';
     call_internal('/internal/users/password-reset/confirm','POST',['token'=>$token,'new_password'=>$pw],null);
     j(['ok'=>true]);
