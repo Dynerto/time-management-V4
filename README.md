@@ -15,3 +15,12 @@ Cookies werken alleen als allowed_origins exact matcht met de PWA‑origin en je
 Geen tokens in de frontend: alleen cookie‑sessies (HttpOnly) + CSRF.
 
 Offline: start/stop werkt zonder internet; de SW synchroniseert zodra je online bent.
+
+
+config die je moet invullen:
+
+public_config.php: backend_url, internal_secret (zelfde als backend), api_key (plaintext key uit backend admin), allowed_origins, app_url, mail_from, optioneel frontend_admin_password_hash.
+
+internal_config.php: db_dsn, db_user, db_pass, en internal_secret.
+
+manifest.json: verwijst naar icons (je eigen PNG’s plaatsen in /icons/).
