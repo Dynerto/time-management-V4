@@ -1,0 +1,50 @@
+/* Basiskaarten, menu, overlays – puur CSS zodat we geen Tailwind build nodig hebben. */
+.card{
+  background:#fff;border:1px solid #e5e7eb;border-radius:.5rem;padding:1rem;margin-bottom:1rem;
+  box-shadow:0 1px 2px rgba(0,0,0,.04);
+}
+.menu{
+  position:absolute;right:0;top:120%;background:#fff;border:1px solid #e5e7eb;border-radius:.5rem;min-width:200px;
+  box-shadow:0 8px 20px rgba(2,6,23,.08);padding:.25rem;z-index:40;
+}
+.menu a{
+  display:block;padding:.5rem .75rem;border-radius:.375rem;color:#0f172a;text-decoration:none;
+}
+.menu a:hover{background:#f1f5f9}
+.hidden{display:none}
+
+.category-item{
+  display:flex;align-items:center;justify-content:space-between;gap:.75rem;padding:.5rem .75rem;border:1px solid #e5e7eb;border-radius:.5rem;margin:.375rem 0;background:#fff;
+}
+.category-color{display:inline-block;width:.85rem;height:.85rem;border-radius:50%;border:1px solid #cbd5e1}
+
+.panel-close{
+  position:absolute;right:.5rem;top:.5rem;cursor:pointer;border-radius:.375rem;padding:.15rem .5rem;
+}
+.panel-close:hover{background:#f1f5f9}
+
+.donut-wrap{display:flex;align-items:center;justify-content:center;min-height:340px;}
+
+.error{
+  background:#fee2e2;border:1px solid #fecaca;color:#991b1b;border-radius:.5rem;padding:.5rem .75rem;margin-bottom:.75rem;
+}
+
+/* Demo-tour overlay */
+.tour-overlay{
+  position:fixed;inset:0;background:rgba(2,6,23,.55);z-index:1000;display:none;
+}
+.tour-spotlight{
+  position:absolute;border:2px solid #60a5fa;border-radius:.5rem;box-shadow:0 0 0 9999px rgba(2,6,23,.55);
+  pointer-events:none;transition:.2s;
+}
+.tour-box{
+  position:absolute;max-width:360px;background:#fff;border:1px solid #e5e7eb;border-radius:.5rem;
+  padding:.75rem;box-shadow:0 10px 24px rgba(2,6,23,.16);
+}
+.tour-actions{display:flex;gap:.5rem;justify-content:flex-end;margin-top:.5rem}
+
+/* FAB */
+#fab{
+  background:#0f172a;color:#fff;line-height:3.25rem;text-align:center;
+}
+#fab:hover{background:#111827}
