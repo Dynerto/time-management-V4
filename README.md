@@ -23,4 +23,35 @@ public_config.php: backend_url, internal_secret (zelfde als backend), api_key (p
 
 internal_config.php: db_dsn, db_user, db_pass, en internal_secret.
 
+
+zelf moet invullen:
+
+Backend/Internal (backend_admin.php)
+
+Voer PostgreSQL DSN/cred in.
+
+Klik Schema initialiseren.
+
+Genereer Public API key (plaintext tonen we éénmalig).
+
+Public/BFF (public_admin.php)
+
+Zet backend_url (naar jouw internal_api.php).
+
+Plak internal_secret (zelfde als backend).
+
+Plak api_key (plaintext uit backend).
+
+Voeg je PWA‑origin toe aan allowed_origins.
+
+Zet app_url + mail_from.
+
+(Optioneel) Stel FE‑admin wachtwoord voor de PWA in (voor Menu ▸ Admin).
+
+Frontend
+
+In PWA Menu ▸ Admin zet je de Public API‑URL; cookies + CSRF regelen de rest.
+
+Offline start/stop werkt; synct zodra online (Background Sync).
+
 manifest.json: verwijst naar icons (je eigen PNG’s plaatsen in /icons/).
