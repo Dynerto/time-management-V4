@@ -27,21 +27,29 @@ $action = $_POST['action'] ?? $_GET['action'] ?? '';
 
 // --- First time bootstrap ---
 if (empty($config['public_admin_password_hash'])) {
-  // Eerste setup verifiëren met setup_token
+  // Eerste setup: stel admin-wachtwoord, verifieer setup_token
+  $msg = null;
   if ($action==='bootstrap') {
     if (!hash_equals((string)$config['setup_token'], (string)($_POST['setup_token'] ?? ''))) {
-      $msg = "Ongeldige setup token."; include __DIR__.'/_public_admin_view.php'; exit;
+      $msg = "Ongeldige setup token.";
+    } else {
+      $pwd1 = (string)($_POST['new_password'] ?? '');
+      if (strlen($pwd1) < 10) {
+        $msg = "Wachtwoord te kort (min 10).";
+      } else {
+        $config['public_admin_password_hash'] = password_hash($pwd1, PASSWORD_DEFAULT);
+        // verbrand de setup token zodat hij niet herbruikbaar is
+        $config['setup_token'] = bin2hex(random_bytes(8));
+        if (!save_config($config,$configFile)) {
+          $msg = "Kon config niet schrijven.";
+        } else {
+          $_SESSION['pub_admin']=true;
+          header('Location: '.$_SERVER['PHP_SELF']); exit;
+        }
+      }
     }
-    $pwd1 = (string)($_POST['new_password'] ?? '');
-    if (strlen($pwd1) < 10) { $msg = "Wachtwoord te kort (min 10)."; include __DIR__.'/_public_admin_view.php'; exit; }
-    $config['public_admin_password_hash'] = password_hash($pwd1, PASSWORD_DEFAULT);
-    $config['setup_token'] = bin2hex(random_bytes(8)); // burn
-    save_config($config,$configFile);
-    $_SESSION['pub_admin']=true;
-    header('Location: '.$_SERVER['PHP_SELF']); exit;
   }
-  // Toon bootstrap view
-  $msg = $msg ?? null;
+  // Toon bootstrap view (Ook als token fout was, tonen we dezelfde pagina met $msg)
   ?>
   <!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Public Admin Setup</title>
@@ -59,6 +67,7 @@ if (empty($config['public_admin_password_hash'])) {
 
 // --- Login ---
 if (empty($_SESSION['pub_admin'])) {
+  $msg = null;
   if ($action==='login') {
     if (password_verify((string)($_POST['password'] ?? ''), (string)$config['public_admin_password_hash'])) {
       $_SESSION['pub_admin']=true; header('Location: '.$_SERVER['PHP_SELF']); exit;
@@ -93,8 +102,7 @@ if ($action==='save') {
   if (!empty($_POST['fe_admin_password'])) {
     $config['frontend_admin_password_hash'] = password_hash((string)$_POST['fe_admin_password'], PASSWORD_DEFAULT);
   }
-  save_config($config,$configFile);
-  $msg='Opgeslagen.';
+  $msg = save_config($config,$configFile) ? 'Opgeslagen.' : 'Kon config niet schrijven.';
 }
 
 // --- View ---
