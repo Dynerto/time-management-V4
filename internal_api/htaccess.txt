@@ -1,16 +1,29 @@
-# Force HTTPS
+# Forceer HTTPS
 RewriteEngine On
 RewriteCond %{HTTPS} !=on
 RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
 
-# Blokkeer directe toegang tot config
-<Files "internal_config.php">
+# Sta PATH_INFO toe (zodat /internal_api.php/... werkt)
+AcceptPathInfo On
+
+# Mooie URLs voor internal API en pairing
+RewriteRule ^internal$ internal_api.php [L,QSA]
+RewriteRule ^internal/(.*)$ internal_api.php/$1 [L,QSA]
+RewriteRule ^pairing$ backend_pairing.php [L,QSA]
+
+# Geen directory listing
+Options -Indexes
+
+# Bescherm gevoelige bestanden
+<FilesMatch "^(internal_config\.php|composer\.json|composer\.lock|\.env|.*\.sql|.*\.bak|.*\.log)$">
   Require all denied
-</Files>
+</FilesMatch>
 
 # Security headers
-Header always set X-Content-Type-Options "nosniff"
-Header always set X-Frame-Options "DENY"
-Header always set Referrer-Policy "no-referrer"
-Header always set Permissions-Policy "geolocation=(), microphone=(), camera=()"
-Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+<IfModule mod_headers.c>
+  Header always set X-Frame-Options "DENY"
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set Referrer-Policy "no-referrer"
+  Header always set Permissions-Policy "geolocation=(), microphone=(), camera=()"
+  Header always set X-Robots-Tag "noindex, nofollow"
+</IfModule>
