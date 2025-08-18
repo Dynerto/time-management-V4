@@ -1,17 +1,23 @@
 <?php
 declare(strict_types=1);
 /**
- * Backend Pairing endpoint (standalone)
- * Gebruik als Public Admin "backend URL": https://<backend>/backend_pairing.php
- * Public Admin zal POSTen naar ?pairing_api=request
+ * Backend Pairing endpoint (standalone, WAF-vriendelijk)
+ * Gebruik in Public Admin als "Backend URL": https://<backend>/
+ *  -> Public Admin probeert dan automatisch /pairing/request (JSON → FORM → GET)
+ * Of direct: https://<backend>/backend_pairing.php?pairing_api=request
  */
+
 @header('X-Robots-Tag: noindex');
 header('Content-Type: application/json; charset=UTF-8');
+header('Cache-Control: no-store');
 
 $config = include __DIR__.'/internal_config.php';
+
 function connect(array $cfg): PDO {
-  $pdo=new PDO($cfg['db_dsn'],$cfg['db_user'],$cfg['db_pass'],[PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION]);
-  return $pdo;
+  if (empty($cfg['db_dsn']) || empty($cfg['db_user'])) {
+    throw new RuntimeException('DB config ontbreekt.');
+  }
+  return new PDO($cfg['db_dsn'],$cfg['db_user'],$cfg['db_pass'],[PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION]);
 }
 function ensure_schema(PDO $pdo): void {
   $sqls=[
@@ -40,16 +46,46 @@ function ensure_schema(PDO $pdo): void {
   foreach($sqls as $q){ try{$pdo->exec($q);}catch(Throwable $e){} }
 }
 
-if (($_GET['pairing_api'] ?? '') !== 'request') {
-  http_response_code(405); echo json_encode(['error'=>'Use ?pairing_api=request']); exit;
-}
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-  http_response_code(405); echo json_encode(['error'=>'POST required']); exit;
+/** Lees pairing-payload uit JSON body, of uit form GET/POST param 'payload' (base64-json) */
+function read_pairing_payload(): array {
+  $isRequest = (($_GET['pairing_api'] ?? '') === 'request') || preg_match('~/pairing/request$~', ($_SERVER['REQUEST_URI'] ?? ''));
+  if (!$isRequest) {
+    http_response_code(405);
+    echo json_encode(['error'=>'Use /pairing/request or ?pairing_api=request']); exit;
+  }
+
+  $ctype = $_SERVER['CONTENT_TYPE'] ?? '';
+  $raw = file_get_contents('php://input') ?: '';
+
+  // 1) JSON body
+  if (stripos($ctype,'application/json') !== false && $raw !== '') {
+    $d = json_decode($raw, true);
+    if (is_array($d)) return $d;
+  }
+
+  // 2) FORM-encoded (payload=base64(json))
+  $payload = $_POST['payload'] ?? $_GET['payload'] ?? null;
+  if (is_string($payload) && $payload !== '') {
+    $json = base64_decode($payload, true);
+    if ($json !== false) {
+      $d = json_decode($json, true);
+      if (is_array($d)) return $d;
+    }
+  }
+
+  // 3) JSON zonder juiste content-type (soms WAF removed header)
+  if ($raw !== '') {
+    $d = json_decode($raw, true);
+    if (is_array($d)) return $d;
+  }
+
+  http_response_code(400);
+  echo json_encode(['error'=>'Invalid or missing payload']); exit;
 }
 
 try {
-  $raw = file_get_contents('php://input') ?: '';
-  $d = json_decode($raw,true) ?: [];
+  $d = read_pairing_payload();
+
   $backend_url    = trim((string)($d['backend_url'] ?? ''));
   $public_api_url = trim((string)($d['public_api_url'] ?? ''));
   $callback_url   = trim((string)($d['callback_url'] ?? ''));
@@ -60,7 +96,7 @@ try {
 
   $ok=true;
   if (stripos($backend_url,'http')!==0 || stripos($public_api_url,'http')!==0) $ok=false;
-  if (stripos($callback_url,'https://')!==0) $ok=false;
+  if (stripos($callback_url,'https://')!==0) $ok=false; // callback moet HTTPS
   if (strlen($callback_secret) < 32 || strlen($request_nonce) < 32) $ok=false;
   if (!$ok) { http_response_code(400); echo json_encode(['error'=>'Invalid pairing payload']); exit; }
 
@@ -70,6 +106,7 @@ try {
   $st->execute([$backend_url,$public_api_url,$public_host,$callback_url,$callback_secret,$request_nonce,$request_ip]);
   $id = (int)$st->fetchColumn();
   echo json_encode(['request_id'=>$id,'status'=>'pending']);
-} catch(Throwable $e){
-  http_response_code(500); echo json_encode(['error'=>$e->getMessage()]);
+} catch (Throwable $e) {
+  http_response_code(500);
+  echo json_encode(['error'=>$e->getMessage()]);
 }
