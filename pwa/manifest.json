@@ -1,14 +1,23 @@
 {
   "name": "Tijdregistratie",
-  "short_name": "Tijdlog",
-  "description": "Multitask tijdregistratie PWA",
-  "start_url": "/index.html",
+  "short_name": "Tijdregistratie",
+  "start_url": "/",
+  "scope": "/",
   "display": "standalone",
-  "background_color": "#f8fafc",
-  "theme_color": "#111827",
+  "background_color": "#0ea5e9",
+  "theme_color": "#0ea5e9",
   "icons": [
-    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
-    { "src": "/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    {
+      "src": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMAAAADACAYAAABl5ifQAAAABmJLR0QA/wD/AP+gvaeTAAAB8ElEQVR4nO3VwQ3CMBRG4ef9b2bq9QkW3aZlH2ST2E3m4A+JY5m0kQ6g1F0gK3S6Qv4r7V1w4H4Hf3GZ0QAAAAAAAAAAAAAAAAAAAAAJgixl8qg1y1tK3s2m4yq1Oe0+9G1WkwWm9x8Q8wqVqfQkqk7g9vWwDq+o3rJv9W0w0v2sG9q3F5sOe5d8dQ9G7+7mZg9f8s9wB2l2y1c2YkU3r8vXo4j3rW3m1x1x4b0s3zZ94eV1mR5Qb9m1K/9f0cZbxF3t0y5zQ4JkqfV7m2i3JQz0y9k1m4m9vH2g7j2qY6zv1z2QGq9q3oCkVn3d5z2S2Rr3V5n2S0QJq1q30AkUn3Y5w2S2Qr3V5r2S0QJq1q30AkUn3Y5w2S2Qr3V5r2S0QZqv6pGq7xw7m1wTzCq+qk6q8sO5tcE8wqvqpOqvLDubXBPMLD0+fN3B4nJ8n1Ycma6z9Kf3m3w5z5v3mYzjv8Qf8EwAAAAAAAAAAAAAAAAAAAADwz8kE2N3mS1p7AAAAAElFTkSuQmCC",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAYAAABccqhmAAAABmJLR0QA/wD/AP+gvaeTAAACW0lEQVR4nO3QwQkCQRBF0Tt7g6h6gQm7b8Aq2b2mNf2xwM8GJbq9eB+5QF3v0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB4y6b8ZcH5m1c3zS0Q6m3z1f3o7v9x8Yb7f7r1v3bN2g0S8iZk8V8l3eXj+YqzQ3+J9G3fX8fG3k7YcP9X0l3k1m0jzH2dGL9mQn7m5kL9mQj7m5kL9mQj7m5kL9mQj7m5kL9mQj7m5kL9mQj7m5kL9mQj7m5kL9mQj7m5kL9mQj7m5kL9mQj7m5kL9mQj7m5kL9mQj7m5kL9mQj7m5kL9mQj7m5kL9mQj7m5kL9mQj7m5kL9mQj7m5kP3v3kQ6m3z1c3j2v7w3sXH3u+e9u8Y3m+fE9Z0n7q3kq7bG8c3i3R7vZ8b3g3t7v5n3w2kAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAID/ATx0GkKcKkGdAAAAAElFTkSuQmCC",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
   ]
 }
