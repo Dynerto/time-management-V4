@@ -3,7 +3,7 @@ RewriteEngine On
 RewriteCond %{HTTPS} !=on
 RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
 
-# Caching: HTML no-cache, assets lang cachen
+# Caching
 <IfModule mod_headers.c>
   <FilesMatch "\.(html)$">
     Header set Cache-Control "no-cache, no-store, must-revalidate"
@@ -13,7 +13,6 @@ RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
   <FilesMatch "\.(js|css|png|svg|ico|webmanifest)$">
     Header set Cache-Control "public, max-age=31536000, immutable"
   </FilesMatch>
-  # Service Worker mag overal opereren
   Header set Service-Worker-Allowed "/"
 </IfModule>
 
