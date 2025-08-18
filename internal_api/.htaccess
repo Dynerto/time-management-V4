@@ -9,7 +9,10 @@ AcceptPathInfo On
 # Mooie URLs voor internal API en pairing
 RewriteRule ^internal$ internal_api.php [L,QSA]
 RewriteRule ^internal/(.*)$ internal_api.php/$1 [L,QSA]
+
+# Pairing "pretty" endpoints (minder WAF-gevoelig)
 RewriteRule ^pairing$ backend_pairing.php [L,QSA]
+RewriteRule ^pairing/request$ backend_pairing.php?pairing_api=request [L,QSA]
 
 # Geen directory listing
 Options -Indexes
