@@ -1,57 +1,13 @@
-Belangrijke aandachtspunten
+Gebruik (kort)
 
-Vul alle placeholders in (example.com, secrets, DSN/DB‑creds).
+Plaats bestanden in twee mappen: /backend en /public op je hosting.
 
-Volgorde van installatie (snel):
+Ga naar /backend/backend_admin.php → Eerste setup: DSN, user, pass, admin‑wachtwoord → Schema initialiseren.
 
-Backend hosten → /backend_admin.php openen → DB invullen → Schema initialiseren → Genereer Public API key → noteer plaintext key.
+Ga naar /public/public_admin.php → Koppelen met backend: vul bij voorkeur https://<backend>/backend_pairing.php → Goedkeuren in Backend Admin → Config wordt automatisch gevuld.
 
-Public/BFF hosten → /public_admin.php → vul backend_url, internal_secret (zelfde als backend), api_key (plaintext van vorige stap), allowed_origins (jouw PWA URL), app_url, mail_from.
+In Public Admin: vul Allowed Origins, App URL, SMTP, en (optioneel) cookie‑instellingen → Opslaan.
 
-Frontend hosten → in de PWA Menu ▸ Admin zet je Public API URL.
+Je PWA kan nu spreken tegen https://<public-domein>/api/... met credentials: 'include'.
 
-Cookies werken alleen als allowed_origins exact matcht met de PWA‑origin en je HTTPS gebruikt.
-
-Geen tokens in de frontend: alleen cookie‑sessies (HttpOnly) + CSRF.
-
-Offline: start/stop werkt zonder internet; de SW synchroniseert zodra je online bent.
-
-
-config die je moet invullen:
-
-public_config.php: backend_url, internal_secret (zelfde als backend), api_key (plaintext key uit backend admin), allowed_origins, app_url, mail_from, optioneel frontend_admin_password_hash.
-
-internal_config.php: db_dsn, db_user, db_pass, en internal_secret.
-
-
-zelf moet invullen:
-
-Backend/Internal (backend_admin.php)
-
-Voer PostgreSQL DSN/cred in.
-
-Klik Schema initialiseren.
-
-Genereer Public API key (plaintext tonen we éénmalig).
-
-Public/BFF (public_admin.php)
-
-Zet backend_url (naar jouw internal_api.php).
-
-Plak internal_secret (zelfde als backend).
-
-Plak api_key (plaintext uit backend).
-
-Voeg je PWA‑origin toe aan allowed_origins.
-
-Zet app_url + mail_from.
-
-(Optioneel) Stel FE‑admin wachtwoord voor de PWA in (voor Menu ▸ Admin).
-
-Frontend
-
-In PWA Menu ▸ Admin zet je de Public API‑URL; cookies + CSRF regelen de rest.
-
-Offline start/stop werkt; synct zodra online (Background Sync).
-
-manifest.json: verwijst naar icons (je eigen PNG’s plaatsen in /icons/).
+Als je nog 403’s ziet bij de koppeling, gebruik backend_pairing.php (zoals hierboven) en controleer of Cloudflare/WAF geen POST naar admin‑paden blokkeert.
