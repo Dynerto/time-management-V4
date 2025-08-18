@@ -1,19 +1,20 @@
-# Force HTTPS
+# Forceer HTTPS
 RewriteEngine On
 RewriteCond %{HTTPS} !=on
 RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
 
-# Cache static assets
-<FilesMatch "\.(js|css|png|jpg|svg|ico|json)$">
-  Header set Cache-Control "public, max-age=31536000, immutable"
-</FilesMatch>
+# Caching: HTML no-cache, assets lang cachen
+<IfModule mod_headers.c>
+  <FilesMatch "\.(html)$">
+    Header set Cache-Control "no-cache, no-store, must-revalidate"
+    Header set Pragma "no-cache"
+    Header set Expires "0"
+  </FilesMatch>
+  <FilesMatch "\.(js|css|png|svg|ico|webmanifest)$">
+    Header set Cache-Control "public, max-age=31536000, immutable"
+  </FilesMatch>
+  # Service Worker mag overal opereren
+  Header set Service-Worker-Allowed "/"
+</IfModule>
 
-# Security headers (frontend)
-Header always set X-Content-Type-Options "nosniff"
-Header always set X-Frame-Options "DENY"
-Header always set Referrer-Policy "no-referrer"
-Header always set Permissions-Policy "geolocation=(), microphone=(), camera=()"
-Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
-
-# Block direct access to hidden files
-RedirectMatch 404 /\.
+Options -Indexes
