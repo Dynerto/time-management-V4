@@ -1,15 +1,12 @@
 <?php
-// Vul de DSN en credentials van jouw PostgreSQL in.
+declare(strict_types=1);
 return [
-    'db_dsn'  => 'pgsql:host=127.0.0.1;port=5432;dbname=timelog', // VUL IN
-    'db_user' => 'DB_USER',                                       // VUL IN
-    'db_pass' => 'DB_PASS',                                       // VUL IN
+  // Vul je DB in via backend_admin.php (Eerste setup)
+  'db_dsn'  => 'pgsql:host=/var/run/postgresql;dbname=YOUR_DB', // bv. pgsql:host=/var/run/postgresql;dbname=dbi40ckaxdjd13
+  'db_user' => 'YOUR_DB_USER',
+  'db_pass' => 'YOUR_DB_PASSWORD',
 
-    // Shared secret voor Public -> Internal
-    'internal_secret' => 'CHANGE-ME-LONG-RANDOM',                 // VUL IN (match met public_config.php)
-
-    // Backend Admin portal login
-    'backend_admin_password_hash' => '', // zet via backend_admin.php bootstrap
-
-    // (optie) andere flags/instellingen...
+  // Deze waarden worden door backend_admin.php gezet
+  'internal_secret' => '',
+  'backend_admin_password_hash' => '',
 ];
