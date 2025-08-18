@@ -1,16 +1,30 @@
-# Force HTTPS
+# Forceer HTTPS
 RewriteEngine On
 RewriteCond %{HTTPS} !=on
 RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
 
-# PHP security
-<FilesMatch "^(public_config|internal_config)\.php$">
+# PATH_INFO toegestaan (zodat /public_api.php/... werkt) + mooie /api/ routes
+AcceptPathInfo On
+RewriteRule ^api$ public_api.php [L,QSA]
+RewriteRule ^api/(.*)$ public_api.php/$1 [L,QSA]
+
+# Geen directory listing
+Options -Indexes
+
+# Bescherm config en sqlite
+<FilesMatch "^(public_config\.php|rate_limit\.sqlite|composer\.json|composer\.lock|\.env|.*\.sql|.*\.bak|.*\.log)$">
   Require all denied
 </FilesMatch>
 
+# Blokkeer directe toegang tot vendor/lib bronnen
+RedirectMatch 404 ^/vendor/.*$
+RedirectMatch 404 ^/lib/phpmailer/src/.*$
+
 # Security headers
-Header always set X-Content-Type-Options "nosniff"
-Header always set X-Frame-Options "DENY"
-Header always set Referrer-Policy "no-referrer"
-Header always set Permissions-Policy "geolocation=(), microphone=(), camera=()"
-Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+<IfModule mod_headers.c>
+  Header always set X-Frame-Options "DENY"
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set Referrer-Policy "no-referrer"
+  Header always set Permissions-Policy "geolocation=(), microphone=(), camera=()"
+  Header always set X-Robots-Tag "noindex, nofollow"
+</IfModule>

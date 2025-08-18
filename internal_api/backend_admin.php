@@ -6,7 +6,7 @@ declare(strict_types=1);
  * - Admin login
  * - Secrets: internal_secret (Public->Internal)
  * - Public API keys (hash in DB)
- * - Pairing workflow:
+ * - Pairing:
  *   * Public Admin POST -> backend_admin.php?pairing_api=request (JSON)
  *   * Admin keurt goed -> Backend genereert plaintext API key, pakt internal_secret
  *   * Backend POST callback (HMAC) -> Public Admin schrijft config
@@ -35,7 +35,6 @@ function connect(array $cfg): PDO {
   return $pdo;
 }
 function ensure_schema(PDO $pdo): void {
-  // UUID via pgcrypto; als je host dit niet toestaat, kun je overschakelen op PHP-UUIDs (extensieloze variant).
   $sqls=[
     "CREATE EXTENSION IF NOT EXISTS pgcrypto;",
     "CREATE TABLE IF NOT EXISTS users(
@@ -85,7 +84,6 @@ function ensure_schema(PDO $pdo): void {
       active BOOLEAN NOT NULL DEFAULT TRUE,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );",
-    // Pairing requests
     "CREATE TABLE IF NOT EXISTS bff_pairing_requests(
       id SERIAL PRIMARY KEY,
       backend_url TEXT NOT NULL,
@@ -106,22 +104,13 @@ function ensure_schema(PDO $pdo): void {
   foreach($sqls as $q){ try{$pdo->exec($q);}catch(Throwable $e){} }
 }
 
-/* ==========================================================
-   Pairing API endpoint (unauthenticated) — vóór login checks
-   ========================================================== */
+/* Pairing API endpoint (unauthenticated) — vóór login checks */
 if (($_GET['pairing_api'] ?? '') === 'request') {
   header('Content-Type: application/json; charset=UTF-8');
   header('Cache-Control: no-store');
-  // Enkel POST + JSON
-  if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    http_response_code(405);
-    echo json_encode(['error'=>'POST required']); exit;
-  }
-  if (!is_array($config) || empty($config['db_dsn'])) {
-    http_response_code(503);
-    echo json_encode(['error'=>'Backend not configured']); exit;
-  }
-  // Lees payload
+  if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); echo json_encode(['error'=>'POST required']); exit; }
+  if (!is_array($config) || empty($config['db_dsn'])) { http_response_code(503); echo json_encode(['error'=>'Backend not configured']); exit; }
+
   $raw = file_get_contents('php://input');
   $d   = json_decode($raw ?: '', true) ?: [];
   $backend_url    = trim((string)($d['backend_url'] ?? ''));
@@ -132,10 +121,9 @@ if (($_GET['pairing_api'] ?? '') === 'request') {
   $public_host    = trim((string)($d['public_host'] ?? ''));
   $request_ip     = $_SERVER['REMOTE_ADDR'] ?? '';
 
-  // Minimale validatie
   $ok = true;
   if (stripos($backend_url,'http')!==0 || stripos($public_api_url,'http')!==0) $ok=false;
-  if (stripos($callback_url,'https://')!==0) $ok=false; // callback moet https zijn
+  if (stripos($callback_url,'https://')!==0) $ok=false;
   if (strlen($callback_secret) < 32 || strlen($request_nonce) < 32) $ok=false;
   if (!$ok) { http_response_code(400); echo json_encode(['error'=>'Invalid pairing payload']); exit; }
 
@@ -153,9 +141,7 @@ if (($_GET['pairing_api'] ?? '') === 'request') {
   exit;
 }
 
-/* ==========================
-   Eerste setup (bootstrap)
-   ========================== */
+/* Eerste setup (bootstrap) */
 if (empty($config['backend_admin_password_hash'])) {
   $err = null;
   if (($_POST['action'] ?? '') === 'bootstrap') {
@@ -198,9 +184,7 @@ if (empty($config['backend_admin_password_hash'])) {
   <?php exit;
 }
 
-/* =========
-   Login
-   ========= */
+/* Login */
 if (empty($_SESSION['be_admin'])) {
   $err=null;
   if (($_POST['action'] ?? '')==='login') {
@@ -222,16 +206,12 @@ if (empty($_SESSION['be_admin'])) {
   <?php exit;
 }
 
-/* =========================
-   Acties na login
-   ========================= */
+/* Acties na login */
 $msg=null; $err=null;
 
-// Probeer verbinding zodat UI keys/pairing kan tonen
 $pdoLive=null;
 try{ $pdoLive=connect($config); ensure_schema($pdoLive); }catch(Throwable $e){ $err=$e->getMessage(); }
 
-// Save DB connectie
 if (($_POST['action'] ?? '')==='save-conn') {
   $config['db_dsn']=trim((string)$_POST['db_dsn']);
   $config['db_user']=trim((string)$_POST['db_user']);
@@ -239,20 +219,17 @@ if (($_POST['action'] ?? '')==='save-conn') {
   $msg = save_config($config,$configFile) ? 'Verbinding opgeslagen.' : 'Kon config niet schrijven.';
 }
 
-// Test verbinding
 $lastTest=null;
 if (($_POST['action'] ?? '')==='test-conn') {
   try{ $pdo=connect($config); $ver = $pdo->query('SELECT version()')->fetchColumn(); $lastTest = '✅ Verbinding OK — '.$ver; }
   catch(Throwable $e){ $lastTest = '❌ Verbinding mislukt: '.$e->getMessage(); }
 }
 
-// Schema initialiseren
 if (($_POST['action'] ?? '')==='init-schema') {
   try{ $pdo=connect($config); ensure_schema($pdo); $msg='Schema OK.'; }
   catch(Throwable $e){ $err='Schema fout: '.$e->getMessage(); }
 }
 
-// Secrets
 if (($_POST['action'] ?? '')==='rotate-secret') {
   $config['internal_secret']=bin2hex(random_bytes(24));
   $msg = save_config($config,$configFile) ? 'Internal secret vernieuwd.' : 'Kon config niet schrijven.';
@@ -266,7 +243,6 @@ if (($_POST['action'] ?? '')==='reveal-secret') {
   }
 }
 
-// Pairing goed/afwijzen
 if (($_POST['action'] ?? '')==='pair-approve' && $pdoLive) {
   try{
     $id=(int)$_POST['id'];
@@ -275,13 +251,11 @@ if (($_POST['action'] ?? '')==='pair-approve' && $pdoLive) {
     $st->execute([$id]); $row=$st->fetch(PDO::FETCH_ASSOC);
     if(!$row || $row['status']!=='pending') throw new RuntimeException('Verzoek niet gevonden of al verwerkt.');
 
-    // Genereer plaintext Public API key + hash opslaan
     $plain = bin2hex(random_bytes(24));
     $hash  = password_hash($plain, PASSWORD_DEFAULT);
     $st2 = $pdoLive->prepare('INSERT INTO api_keys(key_hash,label,role,active) VALUES(?,?,?,TRUE)');
     $st2->execute([$hash,'pair: '.$row['public_host'],'public_api']);
 
-    // Callback payload
     $payload = [
       'request_id'     => (int)$row['id'],
       'request_nonce'  => $row['request_nonce'],
@@ -292,7 +266,6 @@ if (($_POST['action'] ?? '')==='pair-approve' && $pdoLive) {
     $json = json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     $sig  = base64_encode(hash_hmac('sha256', $json, $row['callback_secret'], true));
 
-    // POST callback
     $ch = curl_init($row['callback_url']);
     curl_setopt_array($ch,[
       CURLOPT_POST=>true,
@@ -314,7 +287,6 @@ if (($_POST['action'] ?? '')==='pair-approve' && $pdoLive) {
       throw new RuntimeException('Callback mislukt (HTTP '.$code.'): '.($cerr ?? $resp));
     }
 
-    // Markeer approved
     $pdoLive->prepare("UPDATE bff_pairing_requests SET status='approved', approved_at=NOW() WHERE id=?")->execute([$id]);
     $pdoLive->commit();
     $msg='Koppeling goedgekeurd en secrets verstuurd.';
@@ -331,14 +303,12 @@ if (($_POST['action'] ?? '')==='pair-deny' && $pdoLive) {
   }catch(Throwable $e){ $err='Weigeren fout: '.$e->getMessage(); }
 }
 
-// Keys lijst
 $keys=[];
 if ($pdoLive){
   try{ $keys = $pdoLive->query("SELECT id,label,role,active,created_at FROM api_keys ORDER BY id DESC")->fetchAll(PDO::FETCH_ASSOC); }
   catch(Throwable $e){ $err=$err??$e->getMessage(); }
 }
 
-// Pending pairings
 $pairings=[];
 if ($pdoLive){
   try{ $pairings = $pdoLive->query("SELECT id,backend_url,public_api_url,public_host,callback_url,status,created_at FROM bff_pairing_requests WHERE status='pending' ORDER BY created_at DESC")->fetchAll(PDO::FETCH_ASSOC); }
