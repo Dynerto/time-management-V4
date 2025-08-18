@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Tijdregistratie</title>
 
-  <!-- Tailwind CDN -->
+  <!-- Tailwind -->
   <script src="https://cdn.tailwindcss.com"></script>
 
-  <!-- Manifest & icons -->
+  <!-- Manifest & icon -->
   <link rel="manifest" href="manifest.json" />
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64'%3E%3Crect width='64' height='64' rx='12' fill='%230ea5e9'/%3E%3Cpath d='M20 16h24v6H20zM16 26h16v6H16zM16 36h28v6H16z' fill='white'/%3E%3C/svg%3E" />
 
@@ -16,9 +16,16 @@
     .dragging { opacity: .5 }
     .menu-shadow { box-shadow: 0 10px 30px rgba(0,0,0,.15) }
     .no-tap-highlight { -webkit-tap-highlight-color: transparent; }
+    .glass { background: rgba(255,255,255,.75); backdrop-filter: blur(10px); }
+    .btn { @apply px-4 py-2 rounded; }
+    .btn-primary { @apply bg-sky-600 text-white hover:bg-sky-700; }
+    .btn-ghost { @apply border border-slate-300 hover:bg-slate-50; }
+    .input { @apply w-full border rounded px-3 h-11 bg-white; }
+    .label { @apply text-sm text-slate-600; }
+    .link { @apply text-sky-600 hover:text-sky-700 underline; }
   </style>
 </head>
-<body class="bg-slate-50 text-slate-900 antialiased select-none">
+<body class="bg-gradient-to-br from-slate-50 via-sky-50 to-white text-slate-900 antialiased select-none">
 
   <!-- App bar -->
   <header class="sticky top-0 z-30 bg-white/80 backdrop-blur border-b border-slate-200">
@@ -62,7 +69,7 @@
       <button id="nav-login" class="flex w-full items-center gap-3 px-3 py-2 hover:bg-slate-100">
         <span class="w-2 h-2 rounded-full bg-slate-400"></span> Login / Registreren
       </button>
-      <button id="nav-logout" class="flex w-full items-center gap-3 px-3 py-2 hover:bg-slate-100">
+      <button id="nav-logout" class="flex w-full items-center gap-3 px-3 py-2 hover:bg-slate-100 hidden">
         <span class="w-2 h-2 rounded-full bg-slate-400"></span> Uitloggen
       </button>
     </nav>
@@ -71,7 +78,7 @@
   <!-- Schermen -->
   <main class="max-w-5xl mx-auto p-4">
     <!-- Hoofdscherm -->
-    <section id="screen-main">
+    <section id="screen-main" class="hidden">
       <div class="mb-4 flex items-center justify-between">
         <h2 class="text-base font-semibold">Taken</h2>
         <div class="text-sm text-slate-500" id="userInfo">Niet ingelogd</div>
@@ -108,20 +115,20 @@
       </div>
       <div class="grid gap-4 md:grid-cols-3">
         <label class="block">
-          <span class="text-sm">Kleur >3 actieve taken</span>
+          <span class="label">Kleur >3 actieve taken</span>
           <input id="warn3" type="color" class="w-full h-10 border rounded" />
         </label>
         <label class="block">
-          <span class="text-sm">Kleur >5 actieve taken</span>
+          <span class="label">Kleur >5 actieve taken</span>
           <input id="warn5" type="color" class="w-full h-10 border rounded" />
         </label>
         <label class="block">
-          <span class="text-sm">Kleur >7 actieve taken</span>
+          <span class="label">Kleur >7 actieve taken</span>
           <input id="warn7" type="color" class="w-full h-10 border rounded" />
         </label>
       </div>
       <div class="mt-4">
-        <button id="saveSettings" class="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded">Opslaan</button>
+        <button id="saveSettings" class="btn btn-primary">Opslaan</button>
       </div>
     </section>
 
@@ -134,52 +141,117 @@
       <div class="space-y-3">
         <div class="grid gap-3 md:grid-cols-3">
           <label class="block">
-            <span class="text-sm">Van (ISO)</span>
-            <input id="expFrom" type="datetime-local" class="w-full border rounded px-2 h-10" />
+            <span class="label">Van (ISO)</span>
+            <input id="expFrom" type="datetime-local" class="input" />
           </label>
           <label class="block">
-            <span class="text-sm">Tot (ISO)</span>
-            <input id="expTo" type="datetime-local" class="w-full border rounded px-2 h-10" />
+            <span class="label">Tot (ISO)</span>
+            <input id="expTo" type="datetime-local" class="input" />
           </label>
         </div>
-        <button id="btnExport" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded">Exporteer CSV</button>
-        <a id="downloadLink" class="hidden text-sky-600 underline">Download CSV</a>
+        <button id="btnExport" class="btn btn-primary">Exporteer CSV</button>
+        <a id="downloadLink" class="hidden link">Download CSV</a>
       </div>
     </section>
 
-    <!-- Auth -->
-    <section id="panel-auth" class="hidden">
-      <div class="flex items-center justify-between mb-3">
-        <h2 class="text-base font-semibold">Login / Registreren</h2>
-        <button id="authClose" class="text-slate-500 hover:text-slate-900">✕</button>
-      </div>
-      <div class="grid md:grid-cols-2 gap-6">
-        <form id="formLogin" class="space-y-3">
-          <div class="font-medium">Inloggen</div>
-          <input id="loginEmail" type="email" placeholder="E-mail" class="w-full border rounded px-2 h-10" required />
-          <input id="loginPass" type="password" placeholder="Wachtwoord" class="w-full border rounded px-2 h-10" required />
-          <button class="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded" type="submit">Login</button>
-          <button id="btnResetReq" type="button" class="px-3 py-2 text-slate-700 hover:text-slate-900">Wachtwoord vergeten?</button>
-        </form>
+    <!-- AUTH – premium card -->
+    <section id="panel-auth" class="pt-10 pb-16">
+      <div class="mx-auto max-w-3xl">
+        <div class="grid md:grid-cols-2 gap-8 items-center">
+          <!-- Hero copy -->
+          <div>
+            <h2 class="text-2xl font-bold leading-tight">Welkom terug 👋</h2>
+            <p class="mt-2 text-slate-600">Registreer je tijd per taak. Multitask, aandacht‑verdeling en export – alles in één snelle PWA.</p>
+            <ul class="mt-4 space-y-2 text-slate-600">
+              <li class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-emerald-500"></span> Meerdere taken tegelijk</li>
+              <li class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-sky-500"></span> Aandacht binnen min/max</li>
+              <li class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-violet-500"></span> CSV‑export en dashboard</li>
+            </ul>
+          </div>
 
-        <form id="formRegister" class="space-y-3">
-          <div class="font-medium">Registreren</div>
-          <input id="regEmail" type="email" placeholder="E-mail" class="w-full border rounded px-2 h-10" required />
-          <input id="regPass" type="password" placeholder="Wachtwoord (min 10 tekens)" class="w-full border rounded px-2 h-10" minlength="10" required />
-          <button class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded" type="submit">Account maken</button>
-        </form>
-      </div>
+          <!-- Card -->
+          <div class="glass rounded-xl border border-slate-200 p-4">
+            <div class="flex rounded-lg bg-slate-100 p-1 text-sm">
+              <button id="tabLogin" class="flex-1 py-2 rounded-md bg-white shadow text-slate-900 font-medium">Inloggen</button>
+              <button id="tabRegister" class="flex-1 py-2 rounded-md text-slate-600 hover:text-slate-900">Registreren</button>
+            </div>
 
-      <div id="resetBox" class="hidden mt-6 space-y-3">
-        <div class="font-medium">Wachtwoord resetten</div>
-        <input id="resetToken" type="text" placeholder="Reset token (of via link)" class="w-full border rounded px-2 h-10" />
-        <input id="resetPass" type="password" placeholder="Nieuw wachtwoord" class="w-full border rounded px-2 h-10" />
-        <button id="btnResetDo" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded">Resetten</button>
+            <!-- Login -->
+            <form id="formLogin" class="space-y-3 mt-4">
+              <label class="block">
+                <span class="label">E‑mail</span>
+                <input id="loginEmail" type="email" class="input" placeholder="jij@voorbeeld.nl" required />
+              </label>
+              <label class="block">
+                <span class="label">Wachtwoord</span>
+                <div class="relative">
+                  <input id="loginPass" type="password" class="input pr-11" placeholder="•••••••••" required />
+                  <button type="button" id="loginToggle" class="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-800" title="Toon/verberg">
+                    👁️
+                  </button>
+                </div>
+              </label>
+              <div class="flex items-center justify-between">
+                <label class="flex items-center gap-2 text-sm text-slate-600">
+                  <input id="rememberMe" type="checkbox" class="w-4 h-4" /> Aangemeld blijven
+                </label>
+                <button id="btnResetReq" type="button" class="text-sm link">Wachtwoord vergeten?</button>
+              </div>
+              <button id="btnLogin" class="btn btn-primary w-full flex items-center justify-center gap-2">
+                <span class="inline-block" id="loginLabel">Inloggen</span>
+                <span id="loginSpinner" class="hidden animate-spin">⏳</span>
+              </button>
+              <p class="text-center text-sm text-slate-600">Nog geen account? <a href="#" id="gotoRegister" class="link">Registreren</a></p>
+              <div id="authError" class="hidden text-sm text-rose-600 bg-rose-50 border border-rose-200 rounded p-2"></div>
+            </form>
+
+            <!-- Register -->
+            <form id="formRegister" class="space-y-3 mt-4 hidden">
+              <label class="block">
+                <span class="label">E‑mail</span>
+                <input id="regEmail" type="email" class="input" placeholder="jij@voorbeeld.nl" required />
+              </label>
+              <label class="block">
+                <span class="label">Wachtwoord (minimaal 10 tekens)</span>
+                <div class="relative">
+                  <input id="regPass" type="password" class="input pr-11" minlength="10" placeholder="••••••••••" required />
+                  <button type="button" id="regToggle" class="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-800" title="Toon/verberg">
+                    👁️
+                  </button>
+                </div>
+                <div id="pwMeter" class="mt-1 h-1 rounded bg-slate-200 overflow-hidden">
+                  <div id="pwBar" class="h-1 w-0 bg-rose-500"></div>
+                </div>
+                <p id="pwHint" class="text-xs text-slate-500 mt-1">Gebruik een zin of combineer hoofdletters, cijfers en symbolen.</p>
+              </label>
+              <button id="btnRegister" class="btn btn-primary w-full flex items-center justify-center gap-2">
+                <span id="regLabel">Account maken</span>
+                <span id="regSpinner" class="hidden animate-spin">⏳</span>
+              </button>
+              <p class="text-center text-sm text-slate-600">Heb je al een account? <a href="#" id="gotoLogin" class="link">Inloggen</a></p>
+              <div id="regError" class="hidden text-sm text-rose-600 bg-rose-50 border border-rose-200 rounded p-2"></div>
+            </form>
+
+            <!-- Reset -->
+            <div id="resetBox" class="hidden mt-4 space-y-3">
+              <label class="block">
+                <span class="label">Reset‑token (of kom via je e‑maillink)</span>
+                <input id="resetToken" type="text" class="input" />
+              </label>
+              <label class="block">
+                <span class="label">Nieuw wachtwoord</span>
+                <input id="resetPass" type="password" class="input" />
+              </label>
+              <button id="btnResetDo" class="btn btn-primary w-full">Resetten</button>
+              <div id="resetMsg" class="hidden text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded p-2"></div>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
   </main>
 
-  <!-- Modal -->
+  <!-- Modal taak -->
   <div id="modalTask" class="fixed inset-0 bg-black/40 hidden z-50">
     <div class="bg-white rounded-lg max-w-md mx-auto mt-20 p-4">
       <div class="flex items-center justify-between">
@@ -187,30 +259,30 @@
         <button id="modalClose" class="text-slate-500 hover:text-slate-900">✕</button>
       </div>
       <div class="mt-3 space-y-3">
-        <input id="taskName" type="text" placeholder="Naam" class="w-full border rounded px-2 h-10" />
+        <input id="taskName" type="text" placeholder="Naam" class="input" />
         <div class="grid md:grid-cols-2 gap-3">
           <label class="block">
-            <span class="text-sm">Kleur</span>
+            <span class="label">Kleur</span>
             <input id="taskColor" type="color" class="w-full h-10 border rounded" />
           </label>
           <div class="flex items-end">
-            <button id="btnSoftColor" class="px-3 py-2 border rounded w-full">Zachte kleur</button>
+            <button id="btnSoftColor" class="btn btn-ghost w-full">Zachte kleur</button>
           </div>
         </div>
         <div class="grid md:grid-cols-2 gap-3">
           <label class="block">
-            <span class="text-sm">Min aandacht (%)</span>
-            <input id="taskMin" type="number" min="0" max="100" value="0" class="w-full border rounded px-2 h-10" />
+            <span class="label">Min aandacht (%)</span>
+            <input id="taskMin" type="number" min="0" max="100" value="0" class="input" />
           </label>
           <label class="block">
-            <span class="text-sm">Max aandacht (%)</span>
-            <input id="taskMax" type="number" min="1" max="100" value="100" class="w-full border rounded px-2 h-10" />
+            <span class="label">Max aandacht (%)</span>
+            <input id="taskMax" type="number" min="1" max="100" value="100" class="input" />
           </label>
         </div>
       </div>
       <div class="mt-4 flex justify-end gap-2">
-        <button id="btnDeleteTask" class="hidden px-4 py-2 border rounded">Verwijderen</button>
-        <button id="btnSaveTask" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded">Opslaan</button>
+        <button id="btnDeleteTask" class="hidden btn btn-ghost">Verwijderen</button>
+        <button id="btnSaveTask" class="btn btn-primary">Opslaan</button>
       </div>
     </div>
   </div>
@@ -218,17 +290,16 @@
   <!-- Help overlay -->
   <div id="helpOverlay" class="fixed inset-0 bg-black/60 hidden z-50">
     <div class="max-w-lg mx-auto mt-16 bg-white rounded-lg p-5 space-y-3">
-      <div class="text-lg font-semibold">Welkom bij Tijdregistratie</div>
+      <div class="text-lg font-semibold">Snel aan de slag</div>
       <ol class="list-decimal list-inside text-slate-700 space-y-2">
-        <li>Open het menu (drie stippen) en log in of maak een account aan.</li>
-        <li>Voeg taken toe met de groene “+”. Start/stop per taak. Meerdere taken tegelijk kan.</li>
-        <li>Sleep taken om de volgorde te veranderen (dit wordt bewaard).</li>
-        <li>Aandacht wordt eerlijk verdeeld over actieve taken binnen min/max grenzen.</li>
-        <li>Dashboard toont totalen en sessies. Exporteer data als CSV.</li>
-        <li>Instellingen: waarschuwingkleuren voor >3, >5, >7 gelijktijdige taken.</li>
+        <li>Log in of registreer je account.</li>
+        <li>Maak taken met “+”. Start/stop – meerdere tegelijk kan.</li>
+        <li>Sleep taken om de volgorde te bewaren.</li>
+        <li>Aandacht verdeelt 100% eerlijk binnen min/max.</li>
+        <li>Dashboard voor totalen, Export voor CSV.</li>
       </ol>
       <div class="text-right">
-        <button id="helpClose" class="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded">Aan de slag</button>
+        <button id="helpClose" class="btn btn-primary">Aan de slag</button>
       </div>
     </div>
   </div>
