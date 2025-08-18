@@ -1,12 +1,7 @@
 <?php
 declare(strict_types=1);
 /**
- * Backend/Internal Admin Portal (verbeterd)
- * - Init DB credentials + internal secret
- * - Test DB-verbinding expliciet
- * - Schema initialiseren alleen als verbinding OK is
- * - API keys genereren/revoken
- * - Inloggen vereist
+ * Backend/Internal Admin Portal (met Pairing)
  */
 session_start();
 
@@ -22,72 +17,74 @@ function save_config(array $cfg,string $file): bool {
   $code = "<?php\nreturn ".var_export($cfg,true).";\n";
   return (bool)file_put_contents($file,$code,LOCK_EX);
 }
-
 function connect(array $cfg): PDO {
-  // Let op: SSL vereiste? Gebruik ...;sslmode=require in DSN
-  $pdo=new PDO(
-    $cfg['db_dsn'],
-    $cfg['db_user'],
-    $cfg['db_pass'],
-    [PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION]
-  );
+  $pdo=new PDO($cfg['db_dsn'],$cfg['db_user'],$cfg['db_pass'],[PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION]);
   return $pdo;
 }
-
-function init_schema(PDO $pdo): void {
+function ensure_schema(PDO $pdo){
+  // Basis tabellen
   $sqls=[
-    "CREATE EXTENSION IF NOT EXISTS pgcrypto;",
-    "CREATE TABLE IF NOT EXISTS users(
-      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      email TEXT UNIQUE NOT NULL,
-      password_hash TEXT NOT NULL,
-      email_verified_at TIMESTAMPTZ,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );",
-    "CREATE TABLE IF NOT EXISTS categories(
-      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      user_id UUID NOT NULL,
-      name TEXT NOT NULL,
-      color TEXT,
-      min_attention INT NOT NULL DEFAULT 0,
-      max_attention INT NOT NULL DEFAULT 100,
-      sort_index INT NOT NULL DEFAULT 0,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );",
-    "CREATE TABLE IF NOT EXISTS timelogs(
-      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      user_id UUID NOT NULL,
-      category_id UUID NOT NULL,
-      start_time TIMESTAMPTZ NOT NULL,
-      end_time TIMESTAMPTZ,
-      duration INT,
-      with_tasks TEXT,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );",
-    "CREATE TABLE IF NOT EXISTS email_verification_tokens(
-      id SERIAL PRIMARY KEY,
-      user_id UUID NOT NULL,
-      token_hash TEXT NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );",
-    "CREATE TABLE IF NOT EXISTS password_reset_tokens(
-      id SERIAL PRIMARY KEY,
-      user_id UUID NOT NULL,
-      token_hash TEXT NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );",
-    "CREATE TABLE IF NOT EXISTS api_keys(
-      id SERIAL PRIMARY KEY,
-      key_hash TEXT NOT NULL,
-      label TEXT,
-      role TEXT NOT NULL,
-      active BOOLEAN NOT NULL DEFAULT TRUE,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );",
+    "CREATE TABLE IF NOT EXISTS users(id UUID PRIMARY KEY DEFAULT gen_random_uuid(),email TEXT UNIQUE NOT NULL,password_hash TEXT NOT NULL,email_verified_at TIMESTAMPTZ,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());",
+    "CREATE TABLE IF NOT EXISTS categories(id UUID PRIMARY KEY DEFAULT gen_random_uuid(),user_id UUID NOT NULL,name TEXT NOT NULL,color TEXT,min_attention INT NOT NULL DEFAULT 0,max_attention INT NOT NULL DEFAULT 100,sort_index INT NOT NULL DEFAULT 0,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());",
+    "CREATE TABLE IF NOT EXISTS timelogs(id UUID PRIMARY KEY DEFAULT gen_random_uuid(),user_id UUID NOT NULL,category_id UUID NOT NULL,start_time TIMESTAMPTZ NOT NULL,end_time TIMESTAMPTZ,duration INT,with_tasks TEXT,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());",
+    "CREATE TABLE IF NOT EXISTS email_verification_tokens(id SERIAL PRIMARY KEY,user_id UUID NOT NULL,token_hash TEXT NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());",
+    "CREATE TABLE IF NOT EXISTS password_reset_tokens(id SERIAL PRIMARY KEY,user_id UUID NOT NULL,token_hash TEXT NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());",
+    "CREATE TABLE IF NOT EXISTS api_keys(id SERIAL PRIMARY KEY,key_hash TEXT NOT NULL,label TEXT,role TEXT NOT NULL,active BOOLEAN NOT NULL DEFAULT TRUE,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());",
     "CREATE INDEX IF NOT EXISTS idx_cat_user_sort ON categories(user_id, sort_index);",
-    "CREATE INDEX IF NOT EXISTS idx_logs_user_start ON timelogs(user_id, start_time DESC);"
+    "CREATE INDEX IF NOT EXISTS idx_logs_user_start ON timelogs(user_id, start_time DESC);",
+    // Pairing table
+    "CREATE TABLE IF NOT EXISTS bff_pairing_requests(
+      id SERIAL PRIMARY KEY,
+      backend_url TEXT NOT NULL,
+      public_api_url TEXT NOT NULL,
+      public_host TEXT NOT NULL,
+      callback_url TEXT NOT NULL,
+      callback_secret TEXT NOT NULL,
+      request_nonce TEXT NOT NULL,
+      request_ip TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      approved_at TIMESTAMPTZ
+    );",
+    "CREATE INDEX IF NOT EXISTS idx_pair_status_created ON bff_pairing_requests(status, created_at DESC);"
   ];
   foreach($sqls as $q){ try{$pdo->exec($q);}catch(Throwable $e){} }
+}
+
+// === Pairing API (unauthenticated): register a request from Public Admin ===
+if (($_GET['pairing_api'] ?? '') === 'request') {
+  header('Content-Type: application/json; charset=UTF-8');
+  if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); echo json_encode(['error'=>'POST required']); exit; }
+  if (!is_array($config) || empty($config['db_dsn'])) { http_response_code(503); echo json_encode(['error'=>'Backend not configured']); exit; }
+
+  $raw = file_get_contents('php://input');
+  $d   = json_decode($raw ?: '', true) ?: [];
+  $backend_url    = trim((string)($d['backend_url'] ?? ''));
+  $public_api_url = trim((string)($d['public_api_url'] ?? ''));
+  $callback_url   = trim((string)($d['callback_url'] ?? ''));
+  $callback_secret= (string)($d['callback_secret'] ?? '');
+  $request_nonce  = (string)($d['request_nonce'] ?? '');
+  $public_host    = trim((string)($d['public_host'] ?? ''));
+  $request_ip     = $_SERVER['REMOTE_ADDR'] ?? '';
+
+  // Basic validation
+  $ok = true;
+  if (stripos($backend_url,'http')!==0 || stripos($public_api_url,'http')!==0 || stripos($callback_url,'https://')!==0) $ok=false;
+  if (strlen($callback_secret) < 32 || strlen($request_nonce) < 32) $ok=false;
+  if (!$ok) { http_response_code(400); echo json_encode(['error'=>'Invalid pairing payload']); exit; }
+
+  try{
+    $pdo = connect($config);
+    ensure_schema($pdo);
+    $stmt = $pdo->prepare("INSERT INTO bff_pairing_requests(backend_url,public_api_url,public_host,callback_url,callback_secret,request_nonce,request_ip,status) VALUES(?,?,?,?,?,?,?,'pending') RETURNING id");
+    $stmt->execute([$backend_url,$public_api_url,$public_host,$callback_url,$callback_secret,$request_nonce,$request_ip]);
+    $id = $stmt->fetchColumn();
+    echo json_encode(['request_id'=>(int)$id,'status'=>'pending']);
+  } catch (Throwable $e){
+    http_response_code(500);
+    echo json_encode(['error'=>'DB error: '.$e->getMessage()]);
+  }
+  exit;
 }
 
 // --- Bootstrap (eerste setup) ---
@@ -102,15 +99,11 @@ if (empty($config['backend_admin_password_hash'])) {
     else {
       $config['db_dsn']=$dsn; $config['db_user']=$user; $config['db_pass']=$pass;
       $config['backend_admin_password_hash']=password_hash($pwd1,PASSWORD_DEFAULT);
-      $config['internal_secret']=bin2hex(random_bytes(24));
+      if (empty($config['internal_secret'])) $config['internal_secret']=bin2hex(random_bytes(24));
       if (!save_config($config,$configFile)) $err='Kon config niet schrijven.';
       else {
-        try{
-          $pdo=connect($config);
-          init_schema($pdo);
-          $_SESSION['be_admin']=true;
-          header('Location: '.$_SERVER['PHP_SELF']); exit;
-        }catch(Throwable $e){ $err='DB connect/schema fout: '.$e->getMessage(); }
+        try{ $pdo=connect($config); ensure_schema($pdo); $_SESSION['be_admin']=true; header('Location: '.$_SERVER['PHP_SELF']); exit; }
+        catch(Throwable $e){ $err='DB connect/schema fout: '.$e->getMessage(); }
       }
     }
   }
@@ -119,14 +112,11 @@ if (empty($config['backend_admin_password_hash'])) {
   <title>Backend Admin Setup</title>
   <style>body{font:16px system-ui;padding:2rem;max-width:900px;margin:auto;background:#f8fafc}.card{background:#fff;border:1px solid #e5e7eb;border-radius:.5rem;padding:1rem}</style>
   <h1>Backend Admin – Eerste setup</h1>
-  <?php if(!empty($msg)) echo '<p class="ok">'.h($msg).'</p>'; ?>
   <?php if(!empty($err)) echo '<p style="color:#b91c1c">'.h($err).'</p>'; ?>
   <form method="post" class="card">
     <input type="hidden" name="action" value="bootstrap">
     <h2>Database</h2>
-    <p>DSN (Postgres):<br>
-      <input name="db_dsn" placeholder="pgsql:host=HOST;port=5432;dbname=DB;sslmode=require" required style="width:100%">
-    </p>
+    <p>DSN (Postgres):<br><input name="db_dsn" placeholder="pgsql:host=/var/run/postgresql;dbname=DB" required style="width:100%"></p>
     <p>DB gebruiker:<br><input name="db_user" required style="width:100%"></p>
     <p>DB wachtwoord:<br><input name="db_pass" type="password" style="width:100%"></p>
     <h2>Admin</h2>
@@ -138,7 +128,7 @@ if (empty($config['backend_admin_password_hash'])) {
 
 // --- Login ---
 if (empty($_SESSION['be_admin'])) {
-  $msg=null; $err=null;
+  $err=null;
   if (($_POST['action'] ?? '')==='login') {
     if (password_verify((string)($_POST['password'] ?? ''), (string)$config['backend_admin_password_hash'])) {
       $_SESSION['be_admin']=true; header('Location: '.$_SERVER['PHP_SELF']); exit;
@@ -161,6 +151,9 @@ if (empty($_SESSION['be_admin'])) {
 // --- Acties (na login) ---
 $msg=null; $err=null;
 
+$pdoLive=null;
+try{ $pdoLive=connect($config); ensure_schema($pdoLive); }catch(Throwable $e){ $err=$e->getMessage(); }
+
 // Save DB connectiegegevens
 if (($_POST['action'] ?? '')==='save-conn') {
   $config['db_dsn']=trim((string)$_POST['db_dsn']);
@@ -173,24 +166,14 @@ if (($_POST['action'] ?? '')==='save-conn') {
 $drivers = PDO::getAvailableDrivers();
 $lastTest=null;
 if (($_POST['action'] ?? '')==='test-conn') {
-  try{
-    $pdo=connect($config);
-    $ver = $pdo->query('SELECT version()')->fetchColumn();
-    $lastTest = '✅ Verbinding OK — '.$ver;
-  }catch(Throwable $e){
-    $lastTest = '❌ Verbinding mislukt: '.$e->getMessage();
-  }
+  try{ $pdo=connect($config); $ver = $pdo->query('SELECT version()')->fetchColumn(); $lastTest = '✅ Verbinding OK — '.$ver; }
+  catch(Throwable $e){ $lastTest = '❌ Verbinding mislukt: '.$e->getMessage(); }
 }
 
 // Schema initialiseren
 if (($_POST['action'] ?? '')==='init-schema') {
-  try{
-    $pdo=connect($config); // expliciet verbinden; als dit faalt, gaat het naar catch
-    init_schema($pdo);
-    $msg='Schema OK.';
-  }catch(Throwable $e){
-    $err='Schema fout: '.$e->getMessage();
-  }
+  try{ $pdo=connect($config); ensure_schema($pdo); $msg='Schema OK.'; }
+  catch(Throwable $e){ $err='Schema fout: '.$e->getMessage(); }
 }
 
 // Secrets / keys
@@ -198,37 +181,76 @@ if (($_POST['action'] ?? '')==='rotate-secret') {
   $config['internal_secret']=bin2hex(random_bytes(24));
   $msg = save_config($config,$configFile) ? 'Internal secret vernieuwd.' : 'Kon config niet schrijven.';
 }
-function connect_or_null(array $cfg): ?PDO {
-  try{ return connect($cfg); }catch(Throwable $e){ return null; }
-}
-$pdoLive = connect_or_null($config);
 
-if (($_POST['action'] ?? '')==='gen-key' && $pdoLive) {
+// Pairing: goedkeuren/afwijzen
+if (($_POST['action'] ?? '')==='pair-approve' && $pdoLive) {
   try{
-    $label = trim((string)($_POST['label'] ?? 'Public API'));
+    $id=(int)$_POST['id'];
+    $pdoLive->beginTransaction();
+    $st=$pdoLive->prepare("SELECT * FROM bff_pairing_requests WHERE id=? FOR UPDATE");
+    $st->execute([$id]); $row=$st->fetch(PDO::FETCH_ASSOC);
+    if(!$row || $row['status']!=='pending') throw new RuntimeException('Verzoek niet gevonden of al verwerkt.');
+
+    // Genereer Public API key (plaintext) + hash opslaan
     $plain = bin2hex(random_bytes(24));
-    $hash = password_hash($plain, PASSWORD_DEFAULT);
-    $st = $pdoLive->prepare('INSERT INTO api_keys(key_hash,label,role,active) VALUES(?,?,?,TRUE)');
-    $st->execute([$hash,$label,'public_api']);
-    $msg = 'Nieuwe Public API key (bewaar nu!): '.$plain;
-  }catch(Throwable $e){ $err='Key fout: '.$e->getMessage(); }
-} elseif (($_POST['action'] ?? '')==='gen-key' && !$pdoLive) {
-  $err='Genereer keys: DB niet verbonden. Test de verbinding eerst.';
-}
+    $hash  = password_hash($plain, PASSWORD_DEFAULT);
+    $st2 = $pdoLive->prepare('INSERT INTO api_keys(key_hash,label,role,active) VALUES(?,?,?,TRUE)');
+    $st2->execute([$hash,'pair: '.$row['public_host'],'public_api']);
 
-if (($_POST['action'] ?? '')==='revoke' && $pdoLive) {
+    // Callback payload
+    $payload = [
+      'request_id'     => (int)$row['id'],
+      'request_nonce'  => $row['request_nonce'],
+      'backend_url'    => $row['backend_url'],
+      'internal_secret'=> (string)($config['internal_secret'] ?? ''),
+      'public_api_key' => $plain
+    ];
+    $json = json_encode($payload, JSON_UNESCAPED_SLASHES);
+    $sig  = base64_encode(hash_hmac('sha256', $json, $row['callback_secret'], true));
+
+    // POST naar Public Admin callback
+    $ch = curl_init($row['callback_url']);
+    curl_setopt_array($ch,[
+      CURLOPT_POST=>true,
+      CURLOPT_RETURNTRANSFER=>true,
+      CURLOPT_HTTPHEADER=>['Content-Type: application/json','X-Pair-Signature: '.$sig],
+      CURLOPT_POSTFIELDS=>$json,
+      CURLOPT_TIMEOUT=>15
+    ]);
+    $resp = curl_exec($ch);
+    $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $errc = $resp===false? curl_error($ch): null;
+    curl_close($ch);
+    if ($resp===false || $code>=400) {
+      $pdoLive->rollBack();
+      throw new RuntimeException('Callback mislukt (HTTP '.$code.'): '.($errc ?? $resp));
+    }
+
+    // Markeer approved
+    $pdoLive->prepare("UPDATE bff_pairing_requests SET status='approved', approved_at=NOW() WHERE id=?")->execute([$id]);
+    $pdoLive->commit();
+    $msg='Koppeling goedgekeurd en secrets verstuurd.';
+  }catch(Throwable $e){ if($pdoLive && $pdoLive->inTransaction()) $pdoLive->rollBack(); $err='Pairing fout: '.$e->getMessage(); }
+}
+if (($_POST['action'] ?? '')==='pair-deny' && $pdoLive) {
   try{
-    $id=(int)$_POST['id']; $pdoLive->prepare('UPDATE api_keys SET active=FALSE WHERE id=?')->execute([$id]);
-    $msg='Key revoked.';
-  }catch(Throwable $e){ $err='Revocation fout: '.$e->getMessage(); }
-} elseif (($_POST['action'] ?? '')==='revoke' && !$pdoLive) {
-  $err='Revocation: DB niet verbonden.';
+    $id=(int)$_POST['id'];
+    $pdoLive->prepare("UPDATE bff_pairing_requests SET status='denied' WHERE id=? AND status='pending'")->execute([$id]);
+    $msg='Koppeling geweigerd.';
+  }catch(Throwable $e){ $err='Weigeren fout: '.$e->getMessage(); }
 }
 
-// Keys ophalen (als DB werkt)
+// Keys lijst
 $keys=[];
 if ($pdoLive){
   try{ $keys = $pdoLive->query("SELECT id,label,role,active,created_at FROM api_keys ORDER BY id DESC")->fetchAll(PDO::FETCH_ASSOC); }
+  catch(Throwable $e){ $err=$err??$e->getMessage(); }
+}
+
+// Pending pairings
+$pairings=[];
+if ($pdoLive){
+  try{ $pairings = $pdoLive->query("SELECT id,backend_url,public_api_url,public_host,callback_url,status,created_at FROM bff_pairing_requests WHERE status='pending' ORDER BY created_at DESC")->fetchAll(PDO::FETCH_ASSOC); }
   catch(Throwable $e){ $err=$err??$e->getMessage(); }
 }
 
@@ -240,7 +262,7 @@ if ($pdoLive){
   .card{background:#fff;border:1px solid #e5e7eb;border-radius:.5rem;padding:1rem;margin-bottom:1rem}
   input{width:100%}
   table{width:100%;border-collapse:collapse}
-  th,td{border-bottom:1px solid #e5e7eb;padding:.5rem;text-align:left}
+  th,td{border-bottom:1px solid #e5e7eb;padding:.5rem;text-align:left;vertical-align:top}
   .ok{color:#16a34a}.err{color:#b91c1c}
   code{background:#f1f5f9;padding:0 .25rem;border-radius:.25rem}
 </style>
@@ -252,42 +274,25 @@ if ($pdoLive){
   <h2>Database</h2>
   <form method="post">
     <input type="hidden" name="action" value="save-conn">
-    <p>DSN:<br>
-      <input name="db_dsn" value="<?=h($config['db_dsn'])?>" placeholder="pgsql:host=HOST;port=5432;dbname=DB;sslmode=require">
-    </p>
+    <p>DSN:<br><input name="db_dsn" value="<?=h($config['db_dsn'])?>" placeholder="pgsql:host=/var/run/postgresql;dbname=DB"></p>
     <p>DB user:<br><input name="db_user" value="<?=h($config['db_user'])?>"></p>
     <p>DB pass:<br><input name="db_pass" type="password" placeholder="(ongewijzigd)"></p>
     <p><button>Opslaan</button></p>
   </form>
-
-  <form method="post" style="margin-top:.5rem">
-    <input type="hidden" name="action" value="test-conn">
-    <button>Test DB‑verbinding</button>
-  </form>
-  <?php if($lastTest !== null): ?>
-    <p><?=h($lastTest)?></p>
-  <?php endif; ?>
-
-  <p>Pdo drivers: <code><?=h(implode(', ', $drivers))?></code></p>
+  <form method="post" style="margin-top:.5rem"><input type="hidden" name="action" value="test-conn"><button>Test DB‑verbinding</button></form>
+  <?php if(isset($lastTest)) echo '<p>'.h($lastTest).'</p>'; ?>
+  <p>Pdo drivers: <code><?=h(implode(', ', PDO::getAvailableDrivers()))?></code></p>
 </div>
 
 <div class="card">
   <h2>Schema</h2>
-  <form method="post">
-    <input type="hidden" name="action" value="init-schema">
-    <button>Schema initialiseren/valideren</button>
-  </form>
-  <p style="color:#475569;font-size:14px">
-    Tip: bij cloud Postgres is vaak SSL verplicht. Gebruik in DSN <code>sslmode=require</code> of stricter (verify‑ca/verify‑full met <code>sslrootcert</code>).
-    Sommige providers vragen ook om je webserver‑IP te whitelisten in hun dashboard.
-  </p>
+  <form method="post"><input type="hidden" name="action" value="init-schema"><button>Schema initialiseren/valideren</button></form>
 </div>
 
 <div class="card">
   <h2>Secrets</h2>
   <p>Internal secret (Public→Internal): <code><?=h(substr((string)($config['internal_secret']??''),0,8))?>…</code></p>
-  <form method="post">
-    <input type="hidden" name="action" value="rotate-secret">
+  <form method="post"><input type="hidden" name="action" value="rotate-secret">
     <button style="background:#b91c1c;color:#fff;padding:.4rem .8rem;border-radius:.4rem">Rotate secret</button>
   </form>
 </div>
@@ -296,14 +301,10 @@ if ($pdoLive){
   <h2>Public API keys</h2>
   <form method="post" style="margin-bottom:.75rem">
     <input type="hidden" name="action" value="gen-key">
-    <p>Label (optioneel):<br><input name="label" placeholder="Public API key label"></p>
-    <p><button>Genereer nieuwe key</button></p>
+    <p>(Gebruik pairing hieronder voor automatische uitwisseling. Handmatig genereren kan in uitzonderingen via CLI/DB.)</p>
   </form>
-  <?php if(!$pdoLive): ?>
-    <p class="err">DB niet verbonden — test de verbinding eerst om keys te beheren.</p>
-  <?php endif; ?>
   <table>
-    <thead><tr><th>ID</th><th>Label</th><th>Role</th><th>Actief</th><th>Aangemaakt</th><th>Actie</th></tr></thead>
+    <thead><tr><th>ID</th><th>Label</th><th>Role</th><th>Actief</th><th>Aangemaakt</th></tr></thead>
     <tbody>
       <?php foreach($keys as $k): ?>
       <tr>
@@ -312,19 +313,47 @@ if ($pdoLive){
         <td><?=h((string)$k['role'])?></td>
         <td><?= $k['active'] ? 'ja' : 'nee' ?></td>
         <td><?=h((string)$k['created_at'])?></td>
-        <td>
-          <?php if($k['active']): ?>
-          <form method="post" style="display:inline">
-            <input type="hidden" name="action" value="revoke">
-            <input type="hidden" name="id" value="<?=h((string)$k['id'])?>">
-            <button>Revoke</button>
-          </form>
-          <?php else: ?>—<?php endif; ?>
-        </td>
       </tr>
       <?php endforeach; ?>
     </tbody>
   </table>
+</div>
+
+<div class="card">
+  <h2>Koppelingen (Public API Pairing)</h2>
+  <?php if(!$pdoLive): ?>
+    <p class="err">DB niet verbonden — test de verbinding eerst.</p>
+  <?php endif; ?>
+  <?php if($pairings): ?>
+    <table>
+      <thead><tr><th>ID</th><th>Public host</th><th>Public API URL</th><th>Callback</th><th>Ontvangen</th><th>Actie</th></tr></thead>
+      <tbody>
+      <?php foreach($pairings as $p): ?>
+        <tr>
+          <td><?=h((string)$p['id'])?></td>
+          <td><?=h($p['public_host'])?></td>
+          <td><?=h($p['public_api_url'])?></td>
+          <td><?=h($p['callback_url'])?></td>
+          <td><?=h((string)$p['created_at'])?></td>
+          <td>
+            <form method="post" style="display:inline">
+              <input type="hidden" name="action" value="pair-approve">
+              <input type="hidden" name="id" value="<?=h((string)$p['id'])?>">
+              <button>Goedkeuren</button>
+            </form>
+            <form method="post" style="display:inline">
+              <input type="hidden" name="action" value="pair-deny">
+              <input type="hidden" name="id" value="<?=h((string)$p['id'])?>">
+              <button>Weigeren</button>
+            </form>
+          </td>
+        </tr>
+      <?php endforeach; ?>
+      </tbody>
+    </table>
+  <?php else: ?>
+    <p>Geen openstaande koppelaanvragen.</p>
+  <?php endif; ?>
 </div>
 
 <form method="post" action="?action=logout"><button>Uitloggen</button></form>
