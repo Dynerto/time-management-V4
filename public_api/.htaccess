@@ -1,0 +1,17 @@
+# public_api/.htaccess
+# Pretty routes -> public_api.php?route=...
+# Zorg dat in Apache vHost/hosting "AllowOverride All" staat.
+
+RewriteEngine On
+RewriteBase /
+
+# Bestaande files/folders ongemoeid laten
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule - [L]
+
+# /api/... -> public_api.php?route=...
+RewriteRule ^api/(.*)$ public_api.php?route=$1 [QSA,L]
+
+# /public_api.php/... -> public_api.php?route=...
+RewriteRule ^public_api\.php/(.*)$ public_api.php?route=$1 [QSA,L]
